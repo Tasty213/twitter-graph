@@ -1,7 +1,10 @@
-from enum import Enum
-from operator import truediv
-import requests
 import json
+from typing import Dict, List
+
+import requests
+
+from User import User
+from process_user import UserProcessor
 
 SEED_USER_ID = 1179455215
 SEED_USER_NAME = "EdwardJDavey"
@@ -17,8 +20,36 @@ USER_GROUP_MAPPING = {
 }
 
 
-def get_users_batch(user_id: int, batch_size: int, endpoint: str, cursor: str = ""):
+def main():
+    seed_user = get_seed_user()
+    seed_user = User(seed_user["userId"])
+    producer = UserProcessor()
+    producer.process_user(seed_user)
 
+
+def get_seed_user():
+    return {
+        "userId": SEED_USER_ID,
+        "userName": SEED_USER_NAME,
+        "displayName": SEED_USER_DISPLAY_NAME,
+        "bio": SEED_USER_BIO
+    }
+
+
+def process_user(user: Dict):
+    print(user)
+    if user_node_exists(user):
+        return
+    create_user_node(user)
+    followers, following = get_user_followers_and_following(user)
+    for follower in followers:
+        process_user(follower)
+        create_relationship(follower["userId"], user["userId"], "FOLLOWS")
+    for followee in following:
+        process_user(followee)
+
+
+def get_users_batch(user_id: int, batch_size: int, endpoint: str, cursor: str = ""):
     url = f"https://twitter.com/i/api/graphql/{str(endpoint)}"
 
     parameters = {"userId": str(user_id),
@@ -62,65 +93,44 @@ def get_users_batch(user_id: int, batch_size: int, endpoint: str, cursor: str = 
     response = requests.request(
         "GET", url, headers=headers, params=querystring).json()
     followers = response['data']['user']['result']['timeline']['timeline']['instructions'][-1]['entries'][:-2]
-    cursor = response['data']['user']['result']['timeline']['timeline']['instructions'][-1]['entries'][-2]["content"]["value"]
+    cursor = response['data']['user']['result']['timeline']['timeline']['instructions'][-1]['entries'][-2]["content"][
+        "value"]
     return followers, cursor
 
 
-def extract_users(users: list[dict]):
+def extract_users(users: List[Dict]):
     extracted_users = []
     for user in users:
         extracted_users.append(extract_user(user))
     return assign_users_to_groups(USER_GROUP_MAPPING, extracted_users)
 
 
-def extract_user(follower: dict):
+def extract_user(follower: Dict):
     return {"userId": follower['content']['itemContent']['user_results']['result']['rest_id'],
             "userName": follower['content']['itemContent']['user_results']['result']['legacy']['screen_name'],
             "displayName": follower['content']['itemContent']['user_results']['result']['legacy']['name'],
             "bio": follower['content']['itemContent']['user_results']['result']['legacy']['description']}
 
 
-def get_seed_user():
-    return {
-        "userId": SEED_USER_ID,
-        "userName": SEED_USER_NAME,
-        "displayName": SEED_USER_DISPLAY_NAME,
-        "bio": SEED_USER_BIO
-    }
-
-
-def process_user(user: dict):
-    print(user)
-    if user_node_exists(user):
-        return
-    create_user_node(user)
-    followers, following = get_user_followers_and_following(user)
-    for follower in followers:
-        process_user(follower)
-        create_relationship(follower["userId"], user["userId"], "FOLLOWS")
-    for followee in following:
-        process_user(followee)
-
-
 def create_relationship(source: str, target: str, label: str):
     pass
 
 
-def create_user_node(user: dict):
+def create_user_node(user: Dict):
     pass
 
 
-def user_node_exists(user: dict):
+def user_node_exists(user: Dict):
     pass
 
 
-def get_user_followers_and_following(user: dict):
+def get_user_followers_and_following(user: Dict):
     followers = get_users(user, FOLLOWERS)
     following = get_users(user, FOLLOWING)
     return followers, following
 
 
-def get_users(user: dict, endpoint: str):
+def get_users(user: Dict, endpoint: str):
     users = []
     cursor = ""
     while True:
@@ -133,7 +143,7 @@ def get_users(user: dict, endpoint: str):
     return users
 
 
-def assign_users_to_groups(mappings: dict, users: list[dict], include_users_with_no_group: bool = False):
+def assign_users_to_groups(mappings: Dict, users: List[Dict], include_users_with_no_group: bool = False):
     output_users = []
     for user in users:
         user["groups"] = extract_user_groups(mappings, user)
@@ -142,7 +152,7 @@ def assign_users_to_groups(mappings: dict, users: list[dict], include_users_with
     return output_users
 
 
-def extract_user_groups(mappings: dict, user: dict):
+def extract_user_groups(mappings: Dict, user: Dict):
     groups = []
     for group in mappings.keys():
         if search_dict_for_value(mappings[group], user):
@@ -150,7 +160,7 @@ def extract_user_groups(mappings: dict, user: dict):
     return groups
 
 
-def search_dict_for_value(search_string: str, dictionary: dict):
+def search_dict_for_value(search_string: str, dictionary: Dict):
     for value in dictionary.values():
         if search_string in value:
             return True
@@ -158,5 +168,4 @@ def search_dict_for_value(search_string: str, dictionary: dict):
 
 
 if __name__ == "__main__":
-    seed_user = get_seed_user()
-    process_user(seed_user)
+    main()
